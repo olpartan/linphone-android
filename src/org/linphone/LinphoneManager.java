@@ -22,12 +22,12 @@ import static android.media.AudioManager.MODE_RINGTONE;
 import static android.media.AudioManager.STREAM_RING;
 import static android.media.AudioManager.STREAM_VOICE_CALL;
 
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.sql.Timestamp;
 import java.util.ArrayList;
@@ -152,7 +152,7 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 	private LinphoneAccountCreator accountCreator;
 	private static List<LinphoneChatMessage> mPendingChatFileMessage;
 	private static LinphoneChatMessage mUploadPendingFileMessage;
-
+	private boolean mAreDisplayAlertMessage = false;
 
 	public String wizardLoginViewDomain = null;
 
@@ -214,7 +214,7 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 	private final String mFriendsDatabaseFile;
 	private final String mErrorToneFile;
 	private final String mUserCertificatePath;
-	private ByteArrayInputStream mUploadingImageStream;
+	private byte[] mUploadingImage;
 	private Timer mTimer;
 
 	private void routeAudioToSpeakerHelper(boolean speakerOn) {
@@ -371,16 +371,16 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 		return mUploadPendingFileMessage;
 	}
 
-	public void setUploadingImageStream(ByteArrayInputStream array){
-		this.mUploadingImageStream = array;
+	public void setUploadingImage(byte[] array){
+		this.mUploadingImage = array;
 	}
 
 	@Override
 	public void onLinphoneChatMessageStateChanged(LinphoneChatMessage msg, LinphoneChatMessage.State state) {
 		if (state == LinphoneChatMessage.State.FileTransferDone) {
-			if (msg.isOutgoing() && mUploadingImageStream != null) {
+			if (msg.isOutgoing() && mUploadingImage != null) {
 				mUploadPendingFileMessage = null;
-				mUploadingImageStream = null;
+				mUploadingImage = null;
 			} else {
 				LinphoneUtils.storeImage(getContext(), msg);
 				removePendingMessage(msg);
@@ -388,7 +388,7 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 		}
 
 		if (state == LinphoneChatMessage.State.FileTransferError) {
-			//TODO
+			LinphoneUtils.displayErrorAlert(getString(R.string.image_transfert_error), LinphoneActivity.instance());
 		}
 
 		for (LinphoneChatMessage.LinphoneChatMessageListener l: simpleListeners) {
@@ -402,14 +402,16 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 
 	@Override
 	public void onLinphoneChatMessageFileTransferSent(LinphoneChatMessage msg, LinphoneContent content, int offset, int size, LinphoneBuffer bufferToFill) {
-		if (mUploadingImageStream != null && size > 0) {
+		if (mUploadingImage != null && size > 0) {
 			byte[] data = new byte[size];
-			int read = mUploadingImageStream.read(data, 0, size);
-			if (read > 0) {
+			if (offset + size <= mUploadingImage.length) {
+				for (int i = 0; i < size; i++) {
+					data[i] = mUploadingImage[i + offset];
+				}
 				bufferToFill.setContent(data);
-				bufferToFill.setSize(read);
+				bufferToFill.setSize(size);
 			} else {
-				Log.e("Error, upload task asking for more bytes(" + size + ") than available (" + mUploadingImageStream.available() + ")");
+				Log.e("Error, upload task asking for more bytes( " + (size+offset) + " ) than available (" + mUploadingImage.length + ")");
 			}
 		}
 	}
@@ -465,6 +467,8 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 			LinphoneFriendList mFriendList = (lc.getFriendLists())[0];
 			Log.i("Presence list subscription is " + (enabled ? "enabled" : "disabled"));
 			mFriendList.enableSubscriptions(enabled);
+			if (ContactsManager.getInstance() != null)
+				ContactsManager.getInstance().fetchContactsAsync();
 		}
 	}
 
@@ -683,7 +687,7 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 		finally {
 			try {
 				mServiceContext.unregisterReceiver(mKeepAliveReceiver);
-				mServiceContext.unregisterReceiver(mDozeReceiver);
+				dozeManager(false);
 			} catch (Exception e) {
 				Log.e(e);
 			}
@@ -694,13 +698,6 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 	public void restartLinphoneCore() {
 		destroyLinphoneCore();
 		startLibLinphone(mServiceContext);
-		/*
-		 You cannot receive this through components declared in manifests, only
-		 by explicitly registering for it with Context.registerReceiver(). This is a protected intent that can only
-		 be sent by the system.
-		*/
-		mServiceContext.registerReceiver(mKeepAliveReceiver, mKeepAliveIntentFilter);
-		mServiceContext.registerReceiver(mDozeReceiver, mDozeIntentFilter);
 		sExited = false;
 	}
 
@@ -735,33 +732,36 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 	}
 
 	private void initPushNotificationsService() {
-		try {
-            Class<?> GCMRegistrar = Class.forName("com.google.android.gcm.GCMRegistrar");
-            GCMRegistrar.getMethod("checkDevice", Context.class).invoke(null, mServiceContext);
-            try {
-                GCMRegistrar.getMethod("checkManifest", Context.class).invoke(null, mServiceContext);
-            } catch (IllegalStateException e) {
-                Log.e("[Push Notification] No receiver found", e);
-            }
-            final String regId = (String)GCMRegistrar.getMethod("getRegistrationId", Context.class).invoke(null, mServiceContext);
-            String newPushSenderID = mServiceContext.getString(R.string.push_sender_id);
-            String currentPushSenderID = LinphonePreferences.instance().getPushNotificationRegistrationID();
-            if (regId.equals("") || currentPushSenderID == null || !currentPushSenderID.equals(newPushSenderID)) {
-                GCMRegistrar.getMethod("register", Context.class, String[].class).invoke(null, mServiceContext, new String[]{newPushSenderID});
-                Log.i("[Push Notification] Storing current sender id = " + newPushSenderID);
-            } else {
-                Log.i("[Push Notification] Already registered with id = " + regId);
-                LinphonePreferences.instance().setPushNotificationRegistrationID(regId);
-            }
-        } catch (java.lang.UnsupportedOperationException e) {
-            Log.i("[Push Notification] Not activated");
-        } catch (Exception e1) {
-            Log.i("[Push Notification] Assuming GCM jar is not provided.");
-        }
+		if (getString(R.string.push_type).equals("google")) {
+			try {
+				Class<?> GCMRegistrar = Class.forName("com.google.android.gcm.GCMRegistrar");
+				GCMRegistrar.getMethod("checkDevice", Context.class).invoke(null, mServiceContext);
+				try {
+					GCMRegistrar.getMethod("checkManifest", Context.class).invoke(null, mServiceContext);
+				} catch (IllegalStateException e) {
+					Log.e("[Push Notification] No receiver found", e);
+				}
+				final String regId = (String) GCMRegistrar.getMethod("getRegistrationId", Context.class).invoke(null, mServiceContext);
+				String newPushSenderID = mServiceContext.getString(R.string.push_sender_id);
+				String currentPushSenderID = LinphonePreferences.instance().getPushNotificationRegistrationID();
+				if (regId.equals("") || currentPushSenderID == null || !currentPushSenderID.equals(newPushSenderID)) {
+					GCMRegistrar.getMethod("register", Context.class, String[].class).invoke(null, mServiceContext, new String[]{newPushSenderID});
+					Log.i("[Push Notification] Storing current sender id = " + newPushSenderID);
+				} else {
+					Log.i("[Push Notification] Already registered with id = " + regId);
+					LinphonePreferences.instance().setPushNotificationRegistrationID(regId);
+				}
+			} catch (java.lang.UnsupportedOperationException e) {
+				Log.i("[Push Notification] Not activated");
+			} catch (Exception e1) {
+				Log.i("[Push Notification] Assuming GCM jar is not provided.");
+			}
+		}
 	}
 
 	private synchronized void initLiblinphone(LinphoneCore lc) throws LinphoneCoreException {
 		mLc = lc;
+
 
 		PreferencesMigrator prefMigrator = new PreferencesMigrator(mServiceContext);
 		prefMigrator.migrateRemoteProvisioningUriIfNeeded();
@@ -770,14 +770,6 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 
 		if (prefMigrator.isMigrationNeeded()) {
 			prefMigrator.doMigration();
-		}
-
-		// Some devices could be using software AEC before
-		// This will disable it in favor of hardware AEC if available
-		if (prefMigrator.isEchoMigratioNeeded()) {
-			Log.d("Echo canceller configuration need to be updated");
-			prefMigrator.doEchoMigration();
-			mPrefs.echoConfigurationUpdated();
 		}
 
 		mLc.setZrtpSecretsCache(basePath + "/zrtp_secrets");
@@ -799,7 +791,6 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 		mLc.setCallLogsDatabasePath(mCallLogDatabaseFile);
 		mLc.setFriendsDatabasePath(mFriendsDatabaseFile);
 		mLc.setUserCertificatesPath(mUserCertificatePath);
-		subscribeFriendList(mPrefs.isFriendlistsubscriptionEnabled());
 		//mLc.setCallErrorTone(Reason.NotFound, mErrorToneFile);
 		enableDeviceRingtone(mPrefs.isDeviceRingtoneEnabled());
 
@@ -829,7 +820,9 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 
 		mDozeReceiver = new DozeReceiver();
 
-		mServiceContext.registerReceiver(mDozeReceiver, mDozeIntentFilter);
+		if (mPrefs.isDozeModeEnabled()) {
+			mServiceContext.registerReceiver(mDozeReceiver, mDozeIntentFilter);
+		}
 
 		updateNetworkReachability();
 
@@ -848,7 +841,7 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 		copyIfNotExist(R.raw.linphonerc_default, mLinphoneConfigFile);
 		copyFromPackage(R.raw.linphonerc_factory, new File(mLinphoneFactoryConfigFile).getName());
 		copyIfNotExist(R.raw.lpconfig, mLPConfigXsd);
-		copyIfNotExist(R.raw.rootca, mLinphoneRootCaFile);
+		copyFromPackage(R.raw.rootca, new File(mLinphoneRootCaFile).getName());
 	}
 
 	public void copyIfNotExist(int ressourceId, String target) throws IOException {
@@ -897,25 +890,29 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 	}
 
 	public void updateNetworkReachability() {
-		ConnectivityManager cm = (ConnectivityManager) mServiceContext.getSystemService(Context.CONNECTIVITY_SERVICE);
-		NetworkInfo eventInfo = cm.getActiveNetworkInfo();
+		if (mConnectivityManager == null) return;
 
-		if (eventInfo == null || eventInfo.getState() == NetworkInfo.State.DISCONNECTED || dozeModeEnabled) {
+		NetworkInfo networkInfo = mConnectivityManager.getActiveNetworkInfo();
+
+		if (networkInfo == null || !networkInfo.isConnected()) {
 			Log.i("No connectivity: setting network unreachable");
 			mLc.setNetworkReachable(false);
-		} else if (eventInfo.getState() == NetworkInfo.State.CONNECTED){
-			manageTunnelServer(eventInfo);
+		} else if (dozeModeEnabled) {
+			Log.i("Doze Mode enabled: shutting down network");
+			mLc.setNetworkReachable(false);
+		}else if (networkInfo.isConnected()){
+			manageTunnelServer(networkInfo);
 
 			boolean wifiOnly = LinphonePreferences.instance().isWifiOnlyEnabled();
 			if (wifiOnly){
-				if (eventInfo.getType()==ConnectivityManager.TYPE_WIFI)
+				if (networkInfo.getType()==ConnectivityManager.TYPE_WIFI)
 					mLc.setNetworkReachable(true);
 				else {
 					Log.i("Wifi-only mode, setting network not reachable");
 					mLc.setNetworkReachable(false);
 				}
 			}else{
-				int curtype=eventInfo.getType();
+				int curtype=networkInfo.getType();
 
 				if (curtype!=mLastNetworkType){
 					//if kind of network has changed, we need to notify network_reachable(false) to make sure all current connections are destroyed.
@@ -948,9 +945,20 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 		}
 		finally {
 			mServiceContext.unregisterReceiver(mKeepAliveReceiver);
-			mServiceContext.unregisterReceiver(mDozeReceiver);
+			dozeManager(false);
 			mLc = null;
 			instance = null;
+		}
+	}
+
+	public void dozeManager(boolean enable) {
+		if (enable) {
+			Log.i("[Doze Mode]: register");
+			mServiceContext.registerReceiver(mDozeReceiver, mDozeIntentFilter);
+		} else {
+			Log.i("[Doze Mode]: unregister");
+			dozeModeEnabled = false;
+			mServiceContext.unregisterReceiver(mDozeReceiver);
 		}
 	}
 
@@ -1031,6 +1039,64 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 		} catch (Exception e) {
 			Log.e(e);
 		}
+	}
+
+	@Override
+	public void messageReceivedUnableToDecrypted(LinphoneCore lc, LinphoneChatRoom cr,
+												 LinphoneChatMessage message) {
+		if (mServiceContext.getResources().getBoolean(R.bool.disable_chat)) {
+			return;
+		}
+
+		final LinphoneAddress from = message.getFrom();
+		try {
+			final LinphoneContact contact = ContactsManager.getInstance().findContactFromAddress(from);
+			if (LinphoneActivity.instance().isOnBackground()) {
+				if (!mServiceContext.getResources().getBoolean(R.bool.disable_chat_message_notification)) {
+					if (contact != null) {
+						LinphoneService.instance().displayMessageNotification(from.asStringUriOnly(), contact.getFullName()
+								, getString(R.string.message_cant_be_decrypted_notif));
+					} else {
+						LinphoneService.instance().displayMessageNotification(from.asStringUriOnly(), from.getUserName()
+								, getString(R.string.message_cant_be_decrypted_notif));
+					}
+				}
+			} else if (!mAreDisplayAlertMessage){
+				mAreDisplayAlertMessage = true;
+				final Dialog dialog = LinphoneActivity.instance().displayDialog(
+						getString(R.string.message_cant_be_decrypted).replace("%s"
+								, (contact != null) ? contact.getFullName() : from.getUserName()));
+				Button delete = (Button) dialog.findViewById(R.id.delete_button);
+				delete.setText(getString(R.string.call));
+				Button cancel = (Button) dialog.findViewById(R.id.cancel);
+				cancel.setText(getString(R.string.ok));
+
+				delete.setOnClickListener(new View.OnClickListener() {
+					@Override
+					public void onClick(View view) {
+						LinphoneManager.getInstance().newOutgoingCall(from.asStringUriOnly()
+								, (contact != null) ? contact.getFullName() : from.getUserName());
+						dialog.dismiss();
+						LinphoneManager.getInstance().setAreDisplayAlertMessage(false);
+					}
+				});
+
+				cancel.setOnClickListener(new View.OnClickListener() {
+					@Override
+					public void onClick(View view) {
+						dialog.dismiss();
+						LinphoneManager.getInstance().setAreDisplayAlertMessage(false);
+					}
+				});
+				dialog.show();
+			}
+		} catch (Exception e) {
+			Log.e(e);
+		}
+	}
+
+	public void setAreDisplayAlertMessage(boolean b) {
+		mAreDisplayAlertMessage = b;
 	}
 
 	public String getLastLcStatusMessage() {
@@ -1152,6 +1218,9 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 
 		if (state == State.Connected) {
 			if (mLc.getCallsNb() == 1) {
+				//It is for incoming calls, because outgoing calls enter MODE_IN_COMMUNICATION immediately when they start.
+				//However, incoming call first use the MODE_RINGING to play the local ring.
+				setAudioManagerInCallMode();
 				mAudioManager.abandonAudioFocus(null);
 				requestAudioFocus(STREAM_VOICE_CALL);
 			}
@@ -1160,10 +1229,6 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 				Log.w("Using soft volume audio hack");
 				adjustVolume(0); // Synchronize
 			}
-		}
-
-		if (state == State.OutgoingEarlyMedia) {
-			setAudioManagerInCallMode();
 		}
 
 		if (state == State.CallEnd || state == State.Error) {
@@ -1205,6 +1270,8 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 			}
 		}
 		if (state == State.OutgoingInit) {
+			//Enter the MODE_IN_COMMUNICATION mode as soon as possible, so that ringback
+			//is heard normally in earpiece or bluetooth receiver.
 			setAudioManagerInCallMode();
 			requestAudioFocus(STREAM_VOICE_CALL);
 			startBluetooth();
@@ -1323,8 +1390,8 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 			routeAudioToSpeaker(); // Need to be able to ear the ringtone during the early media
 		}
 
-		if (Hacks.needGalaxySAudioHack())
-			mAudioManager.setMode(MODE_RINGTONE);
+		//if (Hacks.needGalaxySAudioHack())
+		mAudioManager.setMode(MODE_RINGTONE);
 
 		try {
 			if ((mAudioManager.getRingerMode() == AudioManager.RINGER_MODE_VIBRATE || mAudioManager.getRingerMode() == AudioManager.RINGER_MODE_NORMAL) && mVibrator != null) {
@@ -1548,6 +1615,26 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 		dozeModeEnabled = b;
 	}
 
+	public void setDnsServers() {
+		if (mConnectivityManager == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.M)
+			return;
+
+		if (mConnectivityManager.getActiveNetwork() == null
+				|| mConnectivityManager.getLinkProperties(mConnectivityManager.getActiveNetwork()) == null)
+			return;
+
+		int i = 0;
+		List<InetAddress> inetServers = null;
+		inetServers = mConnectivityManager.getLinkProperties(mConnectivityManager.getActiveNetwork()).getDnsServers();
+
+		String[] servers = new String[inetServers.size()];
+
+		for (InetAddress address : inetServers) {
+			servers[i++] = address.getHostAddress();
+		}
+		mLc.setDnsServers(servers);
+	}
+
 	@SuppressWarnings("serial")
 	public static class LinphoneConfigException extends LinphoneException {
 
@@ -1669,6 +1756,13 @@ public class LinphoneManager implements LinphoneCoreListener, LinphoneChatMessag
 	public void friendListRemoved(LinphoneCore lc, LinphoneFriendList list) {
 		// TODO Auto-generated method stub
 	}
+
+	@Override
+	public void networkReachableChanged(LinphoneCore lc, boolean enable) {
+		Log.d("Set Dns servers");
+		setDnsServers();
+	}
+
 	@Override
 	public void authInfoRequested(LinphoneCore lc, String realm,
 			String username, String domain) {

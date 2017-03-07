@@ -58,6 +58,7 @@
     <string name="first_launch_suceeded_once_key">first_launch_suceeded_once_key</string>
 
     <string name="pref_wifi_only_key">pref_wifi_only_key</string>
+	<string name="pref_doze_mode_key">pref_doze_mode_key</string>
 
     <string name="pref_overlay_key">pref_overlay_key</string>
     <string name="pref_video_use_front_camera_key">pref_video_use_front_camera_key</string>
@@ -202,7 +203,7 @@
 		<item>Send logs</item>
 		<item>Cancel</item>
 	</string-array>
-	
+
 	<string name="pref_use_lime_encryption_key">pref_use_lime_encryption_key</string>
 	<string name="pref_device_ringtone_key">pref_device_ringtone_key</string>
 	<string name="pref_auto_answer_key">pref_auto_answer_key</string>

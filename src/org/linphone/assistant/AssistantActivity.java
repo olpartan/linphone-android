@@ -168,13 +168,18 @@ private static AssistantActivity instance;
 					if (address != null && address.asString().equals(cfg.getAddress().asString()) ) {
 						if (state == RegistrationState.RegistrationOk) {
 							if (progress != null) progress.dismiss();
-							if (LinphoneManager.getLc().getDefaultProxyConfig() != null) {
+							if (getResources().getBoolean(R.bool.use_phone_number_validation)
+									&& cfg.getDomain().equals(getString(R.string.default_domain))
+									&& LinphoneManager.getLc().getDefaultProxyConfig() != null) {
 								accountCreator.isAccountUsed();
+							} else {
+								success();
 							}
 						} else if (state == RegistrationState.RegistrationFailed) {
 							if (progress != null) progress.dismiss();
 							if (dialog == null || !dialog.isShowing()) {
 								dialog = createErrorDialog(cfg, smessage);
+								dialog.setCancelable(false);
 								dialog.show();
 							}
 						} else if(!(state == RegistrationState.RegistrationProgress)) {
@@ -510,6 +515,7 @@ private static AssistantActivity instance;
 			.setNoDefault(false);
 
 			mPrefs.enabledFriendlistSubscription(getResources().getBoolean(R.bool.use_friendlist_subscription));
+			LinphoneManager.getInstance().subscribeFriendList(getResources().getBoolean(R.bool.use_friendlist_subscription));
 
 			mPrefs.setStunServer(getString(R.string.default_stun));
 			mPrefs.setIceEnabled(true);

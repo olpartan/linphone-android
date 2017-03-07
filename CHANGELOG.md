@@ -12,7 +12,28 @@ Group changes to describe their impact on the project, as follows:
 
 ## [Incomming]
 
+### Added
+- Lime integration
+- Doze mode(energy saving) button in Network settings
+
+### Changed
+- Migrate Linphone build from ANT to gradle
+- No pause VOIP Call on incoming GSM call until we off hook this
+- Subscription friends list enabled by default only for linphone domain
+
+### Fixed
+- Rotation after screen locking
+- Contacts background task
+- No more asking phone number for non-linphone domain
+- Bug with Linphone credential login
+
 ## [Unreleased]
+
+## [3.2.4] - 2017-01-19
+
+### Fixed
+- Some crashs
+- Some UI bugs
 
 ## [3.2.3] - 2017-01-11
 

@@ -861,11 +861,10 @@ public class SettingsFragment extends PreferencesListFragment {
 		CheckBoxPreference rfc2833 = (CheckBoxPreference) findPreference(getString(R.string.pref_rfc2833_dtmf_key));
 		CheckBoxPreference sipInfo = (CheckBoxPreference) findPreference(getString(R.string.pref_sipinfo_dtmf_key));
 
+		rfc2833.setChecked(mPrefs.useRfc2833Dtmfs());
+		sipInfo.setChecked(mPrefs.useSipInfoDtmfs());
 		deviceRingtone.setChecked(mPrefs.isDeviceRingtoneEnabled());
 		autoAnswer.setChecked(mPrefs.isAutoAnswerEnabled());
-
-		rfc2833.setChecked(false);
-		sipInfo.setChecked(false);
 
 		setPreferenceDefaultValueAndSummary(R.string.pref_voice_mail_key, mPrefs.getVoiceMailUri());
 	}
@@ -957,6 +956,12 @@ public class SettingsFragment extends PreferencesListFragment {
 		});
 	}
 
+	private void setEncryptionZrtp() {
+		LinphoneUtils.displayErrorAlert(getString(R.string.lime_encryption_enable_zrtp), LinphoneActivity.instance());
+		mPrefs.setMediaEncryption(MediaEncryption.ZRTP);
+		findPreference(getString(R.string.pref_media_encryption_key)).setSummary(mPrefs.getMediaEncryption().toString());
+	}
+
 	private void initChatSettings() {
 		setPreferenceDefaultValueAndSummary(R.string.pref_image_sharing_server_key, mPrefs.getSharingPictureServerUrl());
 		initLimeEncryptionPreference((ListPreference) findPreference(getString(R.string.pref_use_lime_encryption_key)));
@@ -988,8 +993,10 @@ public class SettingsFragment extends PreferencesListFragment {
 				if (lime == LinphoneLimeState.Disabled) {
 					preference.setSummary(getString(R.string.lime_encryption_entry_disabled));
 				} else if (lime == LinphoneLimeState.Mandatory) {
+					setEncryptionZrtp();
 					preference.setSummary(getString(R.string.lime_encryption_entry_mandatory));
 				} else if (lime == LinphoneLimeState.Preferred) {
+					setEncryptionZrtp();
 					preference.setSummary(getString(R.string.lime_encryption_entry_preferred));
 				}
 
@@ -1000,6 +1007,8 @@ public class SettingsFragment extends PreferencesListFragment {
 
 	private void initNetworkSettings() {
 		((CheckBoxPreference) findPreference(getString(R.string.pref_wifi_only_key))).setChecked(mPrefs.isWifiOnlyEnabled());
+
+		((CheckBoxPreference) findPreference(getString(R.string.pref_doze_mode_key))).setChecked(mPrefs.isDozeModeEnabled());
 
 		// Disable UPnP if ICE si enabled, or disable ICE if UPnP is enabled
 		CheckBoxPreference ice = (CheckBoxPreference) findPreference(getString(R.string.pref_ice_enable_key));
@@ -1037,6 +1046,15 @@ public class SettingsFragment extends PreferencesListFragment {
 			@Override
 			public boolean onPreferenceChange(Preference preference, Object newValue) {
 				mPrefs.setWifiOnlyEnabled((Boolean) newValue);
+				return true;
+			}
+		});
+
+		findPreference(getString(R.string.pref_doze_mode_key)).setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
+			@Override
+			public boolean onPreferenceChange(Preference preference, Object newValue) {
+				mPrefs.enableDozeMode((Boolean) newValue);
+				LinphoneManager.getInstance().dozeManager((Boolean) newValue);
 				return true;
 			}
 		});
@@ -1142,6 +1160,7 @@ public class SettingsFragment extends PreferencesListFragment {
 	}
 
 	private void initAdvancedSettings() {
+		((CheckBoxPreference)findPreference(getString(R.string.pref_friendlist_subscribe_key))).setChecked(mPrefs.isFriendlistsubscriptionEnabled());
 		((CheckBoxPreference)findPreference(getString(R.string.pref_debug_key))).setChecked(mPrefs.isDebugEnabled());
 		((CheckBoxPreference)findPreference(getString(R.string.pref_background_mode_key))).setChecked(mPrefs.isBackgroundModeEnabled());
 		((CheckBoxPreference)findPreference(getString(R.string.pref_service_notification_key))).setChecked(mPrefs.getServiceNotificationVisibility());
@@ -1152,6 +1171,17 @@ public class SettingsFragment extends PreferencesListFragment {
 	}
 
 	private void setAdvancedPreferencesListener() {
+
+		findPreference(getString(R.string.pref_friendlist_subscribe_key)).setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
+			@Override
+			public boolean onPreferenceChange(Preference preference, Object newValue) {
+				boolean value = (Boolean) newValue;
+				mPrefs.enabledFriendlistSubscription(value);
+				LinphoneManager.getInstance().subscribeFriendList(value);
+				return true;
+			}
+		});
+
 		findPreference(getString(R.string.pref_debug_key)).setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
 			@Override
 			public boolean onPreferenceChange(Preference preference, Object newValue) {

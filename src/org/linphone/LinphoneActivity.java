@@ -133,10 +133,10 @@ public class LinphoneActivity extends LinphoneGenericActivity implements OnClick
 	private RelativeLayout sideMenuContent, quitLayout, defaultAccount;
 	private ListView accountsList, sideMenuItemList;
 	private ImageView menu;
-	private boolean fetchedContactsOnce = false;
 	private boolean doNotGoToCallActivity = false;
 	private List<String> sideMenuItems;
 	private boolean callTransfer = false;
+	private boolean isOnBackground = false;
 
 	static final boolean isInstanciated() {
 		return instance != null;
@@ -183,10 +183,12 @@ public class LinphoneActivity extends LinphoneGenericActivity implements OnClick
 			if (getPackageManager().checkPermission(Manifest.permission.WRITE_SYNC_SETTINGS, getPackageName()) != PackageManager.PERMISSION_GRANTED) {
 				checkSyncPermission();
 			} else {
-				ContactsManager.getInstance().initializeSyncAccount(getApplicationContext(), getContentResolver());
+				if (LinphoneService.isReady())
+					ContactsManager.getInstance().initializeSyncAccount(getApplicationContext(), getContentResolver());
 			}
 		} else {
-			ContactsManager.getInstance().initializeContactManager(getApplicationContext(), getContentResolver());
+			if (LinphoneService.isReady())
+				ContactsManager.getInstance().initializeContactManager(getApplicationContext(), getContentResolver());
 		}
 
 		setContentView(R.layout.main);
@@ -222,7 +224,8 @@ public class LinphoneActivity extends LinphoneGenericActivity implements OnClick
 
 				refreshAccounts();
 
-				if(getResources().getBoolean(R.bool.use_phone_number_validation)) {
+				if(getResources().getBoolean(R.bool.use_phone_number_validation)
+						&& proxy.getDomain().equals(getString(R.string.default_domain))) {
 					if (state.equals(RegistrationState.RegistrationOk)) {
 						LinphoneManager.getInstance().isAccountWithAlias();
 					}
@@ -867,7 +870,7 @@ public class LinphoneActivity extends LinphoneGenericActivity implements OnClick
 			missedCalls.setText(missedCallsCount + "");
 			missedCalls.setVisibility(View.VISIBLE);
 		} else {
-			LinphoneManager.getLc().resetMissedCallsCount();
+			if (LinphoneManager.isInstanciated()) LinphoneManager.getLc().resetMissedCallsCount();
 			missedCalls.clearAnimation();
 			missedCalls.setVisibility(View.GONE);
 		}
@@ -1124,6 +1127,7 @@ public class LinphoneActivity extends LinphoneGenericActivity implements OnClick
 			lc.removeListener(mListener);
 		}
 		callTransfer = false;
+		isOnBackground = true;
 
 		super.onPause();
 	}
@@ -1260,10 +1264,9 @@ public class LinphoneActivity extends LinphoneGenericActivity implements OnClick
 		}
 		if (readContactsI >= 0 && grantResults[readContactsI] == PackageManager.PERMISSION_GRANTED) {
 			ContactsManager.getInstance().enableContactsAccess();
-			if (!fetchedContactsOnce) {
+			if (!ContactsManager.getInstance().contactsFetchedOnce()) {
 				ContactsManager.getInstance().enableContactsAccess();
 				ContactsManager.getInstance().fetchContactsAsync();
-				fetchedContactsOnce = true;
 			}
 		}
 	}
@@ -1300,10 +1303,9 @@ public class LinphoneActivity extends LinphoneGenericActivity implements OnClick
 				permissionsList.add(Manifest.permission.READ_CONTACTS);
 			}
 		} else {
-			if (!fetchedContactsOnce) {
+			if (!ContactsManager.getInstance().contactsFetchedOnce()) {
 				ContactsManager.getInstance().enableContactsAccess();
 				ContactsManager.getInstance().fetchContactsAsync();
-				fetchedContactsOnce = true;
 			}
 		}
 
@@ -1317,14 +1319,12 @@ public class LinphoneActivity extends LinphoneGenericActivity implements OnClick
 	@Override
 	protected void onSaveInstanceState(Bundle outState) {
 		outState.putSerializable("currentFragment", currentFragment);
-		outState.putBoolean("fetchedContactsOnce", fetchedContactsOnce);
 		super.onSaveInstanceState(outState);
 	}
 
 	@Override
 	protected void onRestoreInstanceState(Bundle savedInstanceState) {
 		super.onRestoreInstanceState(savedInstanceState);
-		fetchedContactsOnce = savedInstanceState.getBoolean("fetchedContactsOnce");
 	}
 
 	@Override
@@ -1358,11 +1358,6 @@ public class LinphoneActivity extends LinphoneGenericActivity implements OnClick
 		}
 
 		updateMissedChatCount();
-		if(LinphonePreferences.instance().isFriendlistsubscriptionEnabled() && LinphoneManager.getLc().getDefaultProxyConfig() != null){
-			LinphoneManager.getInstance().subscribeFriendList(true);
-		} else {
-			LinphoneManager.getInstance().subscribeFriendList(false);
-		}
 
 		displayMissedCalls(LinphoneManager.getLc().getMissedCallsCount());
 
@@ -1383,6 +1378,7 @@ public class LinphoneActivity extends LinphoneGenericActivity implements OnClick
 			}
 		}
 		doNotGoToCallActivity = false;
+		isOnBackground = false;
 	}
 
 	@Override
@@ -1459,6 +1455,10 @@ public class LinphoneActivity extends LinphoneGenericActivity implements OnClick
 				}
 			}
 		}
+	}
+
+	public boolean isOnBackground() {
+		return isOnBackground;
 	}
 
 	public boolean onKeyDown(int keyCode, KeyEvent event) {

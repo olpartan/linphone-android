@@ -159,6 +159,7 @@ public class LinphonePreferences {
 
 	private LinphoneAuthInfo getAuthInfo(int n) {
 		LinphoneProxyConfig prxCfg = getProxyConfig(n);
+		if (prxCfg == null) return null;
 		try {
 			LinphoneAddress addr = LinphoneCoreFactory.instance().createLinphoneAddress(prxCfg.getIdentity());
 			LinphoneAuthInfo authInfo = getLc().findAuthInfo(addr.getUserName(), null, addr.getDomain());
@@ -1099,7 +1100,7 @@ public class LinphonePreferences {
 			 String appId = getString(R.string.push_sender_id);
 			 if (regId != null && lc.getProxyConfigList().length > 0) {
 				 for (LinphoneProxyConfig lpc : lc.getProxyConfigList()) {
-					 String contactInfos = "app-id=" + appId + ";pn-type=google;pn-tok=" + regId;
+					 String contactInfos = "app-id=" + appId + ";pn-type=" + getString(R.string.push_type) + ";pn-tok=" + regId;
 					 lpc.edit();
 					 lpc.setContactUriParameters(contactInfos);
 					 lpc.done();
@@ -1125,7 +1126,7 @@ public class LinphonePreferences {
 	}
 
 	public void setPushNotificationRegistrationID(String regId) {
-		 getConfig().setString("app", "push_notification_regid", regId);
+		 getConfig().setString("app", "push_notification_regid", (regId != null) ? regId: "");
 		 setPushNotificationEnabled(isPushNotificationEnabled());
 	}
 
@@ -1465,6 +1466,14 @@ public class LinphonePreferences {
 
 	public int getCodeLength(){
 		return getConfig().getInt("app", "activation_code_length", 0);
+	}
+
+	public boolean isDozeModeEnabled() {
+		return getConfig().getBool("app", "doze_mode", true);
+	}
+
+	public void enableDozeMode(boolean enable) {
+		getConfig().setBool("app", "doze_mode", enable);
 	}
 
 	public void disableFriendsStorage() {

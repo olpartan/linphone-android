@@ -1,6 +1,7 @@
+package org.linphone;
 /*
-PhoneStateReceiver.java
-Copyright (C) 2011  Belledonne Communications, Grenoble, France
+RemoteProvisioningActivity.java
+Copyright (C) 2014  Belledonne Communications, Grenoble, France
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -16,31 +17,29 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
-package org.linphone;
+
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.telephony.TelephonyManager;
+import android.util.Log;
 
 /**
- * Pause current SIP calls when GSM phone rings or is active.
- *
- * @author Guillaume Beraudo
- *
+ * @author Graham Barnett
  */
-public class PhoneStateChangedReceiver extends BroadcastReceiver {
+public class AccountEnableReceiver extends BroadcastReceiver {
+	private static final String TAG = "AccountEnableReceiver";
+	private static final String FIELD_ID = "id";
+	private static final String FIELD_ACTIVE = "active";
+
 	@Override
 	public void onReceive(Context context, Intent intent) {
-		final String extraState = intent.getStringExtra(TelephonyManager.EXTRA_STATE);
-
-		if (TelephonyManager.EXTRA_STATE_OFFHOOK.equals(extraState)) {
-			LinphoneManager.setGsmIdle(false);
-			if (!LinphoneManager.isInstanciated())
-				return;
-			LinphoneManager.getLc().pauseAllCalls();
-        } else if (TelephonyManager.EXTRA_STATE_IDLE.equals(extraState)) {
-        	LinphoneManager.setGsmIdle(true);
-        }
+		int prefsAccountIndex = (int)(long)intent.getLongExtra(FIELD_ID, -1);
+		boolean enable = intent.getBooleanExtra(FIELD_ACTIVE, true);
+		Log.i(TAG, "Received broadcast for index=" + Integer.toString(prefsAccountIndex) + ",enable=" + Boolean.toString(enable));
+		if (prefsAccountIndex < 0 || prefsAccountIndex >= LinphonePreferences.instance().getAccountCount())
+			return;
+		LinphonePreferences.instance().setAccountEnabled(prefsAccountIndex, enable);
 	}
 }
+

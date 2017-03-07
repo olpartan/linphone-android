@@ -65,6 +65,12 @@ class AndroidArmv7Target(AndroidTarget):
         AndroidTarget.__init__(self, 'armv7')
 
 
+class AndroidArm64Target(AndroidTarget):
+
+    def __init__(self):
+        AndroidTarget.__init__(self, 'arm64')
+
+
 class AndroidX86Target(AndroidTarget):
 
     def __init__(self):
@@ -76,13 +82,14 @@ class AndroidX86Target(AndroidTarget):
 android_targets = {
     'arm': AndroidArmTarget(),
     'armv7': AndroidArmv7Target(),
+    'arm64': AndroidArm64Target(),
     'x86': AndroidX86Target()
 }
 
 class AndroidPreparator(prepare.Preparator):
 
     def __init__(self, targets=android_targets):
-        prepare.Preparator.__init__(self, targets)
+        prepare.Preparator.__init__(self, targets, default_targets=['armv7', 'arm64', 'x86'])
         self.min_supported_ndk = 10
         self.max_supported_ndk = 13
         self.unsupported_ndk_version = None
@@ -176,6 +183,13 @@ class AndroidPreparator(prepare.Preparator):
         if os.path.isdir('liblinphone-sdk') and not os.listdir('liblinphone-sdk'):
             os.rmdir('liblinphone-sdk')
 
+    def prepare(self):
+        self.download_gradle()
+        prepare.Preparator.prepare(self)
+
+    def download_gradle(self):
+        os.system('./gradlew')
+
     def generate_makefile(self, generator, project_file=''):
         platforms = self.args.target
         arch_targets = ""
@@ -207,6 +221,9 @@ clean: java-clean
 install: install-apk run-linphone
 
 java-clean:
+\t./gradlew clean
+
+ant-clean:
 \tant clean
 
 $(TOPDIR)/res/raw/rootca.pem:
@@ -251,6 +268,25 @@ copy-libs:
 \t\tcp -f liblinphone-sdk/android-armv7/bin/gdbserver libs/armeabi-v7a && \\
 \t\tcp -f liblinphone-sdk/android-armv7/bin/gdb.setup libs/armeabi-v7a; \\
 \tfi
+\trm -rf libs-debug/arm64-v8a
+\trm -rf libs/arm64-v8a
+\tif test -d "liblinphone-sdk/android-arm64"; then \\
+\t\tmkdir -p libs-debug/arm64-v8a && \\
+\t\tcp -f liblinphone-sdk/android-arm64/lib/libgnustl_shared.so libs-debug/arm64-v8a && \\
+\t\tcp -f liblinphone-sdk/android-arm64/lib/lib*-arm64-v8a.so libs-debug/arm64-v8a && \\
+\t\tcp -f liblinphone-sdk/android-arm64/lib/mediastreamer/plugins/*.so libs-debug/arm64-v8a && \\
+\t\tmkdir -p libs/arm64-v8a && \\
+\t\tcp -f liblinphone-sdk/android-arm64/lib/libgnustl_shared.so libs/arm64-v8a && \\
+\t\tcp -f liblinphone-sdk/android-arm64/lib/lib*-arm64-v8a.so libs/arm64-v8a && \\
+\t\tcp -f liblinphone-sdk/android-arm64/lib/mediastreamer/plugins/*.so libs/arm64-v8a && \\
+\t\tsh WORK/android-arm64/strip.sh libs/arm64-v8a/*.so; \\
+\tfi
+\tif test -f "liblinphone-sdk/android-arm64/bin/gdbserver"; then \\
+\t\tcp -f liblinphone-sdk/android-arm64/bin/gdbserver libs-debug/arm64-v8a && \\
+\t\tcp -f liblinphone-sdk/android-arm64/bin/gdb.setup libs-debug/arm64-v8a && \\
+\t\tcp -f liblinphone-sdk/android-arm64/bin/gdbserver libs/arm64-v8a && \\
+\t\tcp -f liblinphone-sdk/android-arm64/bin/gdb.setup libs/arm64-v8a; \\
+\tfi
 \trm -rf libs-debug/x86
 \trm -rf libs/x86
 \tif test -d "liblinphone-sdk/android-x86"; then \\
@@ -281,30 +317,23 @@ update-mediastreamer2-project:
 
 generate-apk: java-clean build copy-libs $(TOPDIR)/res/raw/rootca.pem update-project
 \techo "version.name=$(LINPHONE_ANDROID_VERSION)" > default.properties && \\
-\tant debug
+\t./gradlew assembleDebug
 
-generate-mediastreamer2-apk: java-clean build copy-libs update-mediastreamer2-project
+generate-mediastreamer2-apk: ant-clean build copy-libs update-mediastreamer2-project
 \t@cd $(TOPDIR)/submodules/linphone/mediastreamer2/java && \\
 \techo "version.name=$(LINPHONE_ANDROID_VERSION)" > default.properties && \\
 \tant debug
 
-quick:
-\tant clean
-\tant debug
-\tant installd
-\tant run
+quick: clean install-apk run-linphone
 
 install-apk:
-\tant installd
+\t./gradlew installDebug
 
 uninstall:
 \tadb uninstall $(PACKAGE_NAME)
 
 release: java-clean build copy-libs update-project
-\tpatch -p1 < release.patch
-\tcat ant.properties | grep version.name > default.properties
-\tant release
-\tpatch -Rp1 < release.patch
+\t./gradlew assembleRelease
 
 generate-sdk: liblinphone-android-sdk
 
@@ -322,18 +351,16 @@ liblinphone_tester:
 \t$(MAKE) -C liblinphone_tester
 
 run-linphone:
-\tant run
+\tadb shell monkey -p $(PACKAGE_NAME) -c android.intent.category.LAUNCHER 1
 
 run-liblinphone-tests:
 \t@cd liblinphone_tester && \\
 \tmake run-all-tests
 
-run-basic-tests: update-project
-\tant partial-clean
+run-basic-tests: clean update-project
 \t$(MAKE) -C tests run-basic-tests ANT_SILENT=$(ANT_SILENT)
 
-run-all-tests: update-project
-\tant partial-clean
+run-all-tests: clean update-project
 \t$(MAKE) -C tests run-all-tests ANT_SILENT=$(ANT_SILENT)
 
 pull-transifex:
